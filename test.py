@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 # ----------------------------
 # 1) Load data
 # ----------------------------
-FILE_PATH = "train.xlsx"  # <- change if needed
+FILE_PATH = "DATA/train.xlsx"  # <- change if needed
 OUT_DIR = "figures"
 os.makedirs(OUT_DIR, exist_ok=True)
 
