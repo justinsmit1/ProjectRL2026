@@ -110,7 +110,8 @@ class QAgent():
         else:
             return profit - price_current_volume
 
-
+    def calculate_energy_in_tank_in_eu(self, volume, price):
+        return (volume * self.env.volume_to_MWh * price)
 
     def create_Q_table(self):
         self.state_space = len(self.bin_size) - 1
@@ -150,6 +151,7 @@ class QAgent():
 
         self.rewards = []
         self.average_rewards = []
+        self.money_in_tank = 0.0 # how much energy there is in the tank, and how much it is worth
 
         # Call the Q table function to create an initialized Q table
         self.create_Q_table()
@@ -172,6 +174,9 @@ class QAgent():
             print(f'Please wait, the algorithm is learning! The current simulation is {i}')
             # Initialize the state
             state = self.env.reset()[0]  # reset returns a dict, need to take the 0th entry.
+
+            self.money_in_tank = self.calculate_energy_in_tank_in_eu(state[0], state[1])
+
             #print(state)
             # Set a variable that flags if an episode has terminated
             done = False
@@ -205,12 +210,26 @@ class QAgent():
                 action = action_index - 1
 
             # Step environment
+                volume_before_action, price_before_action, _, _, _, _, _ = self.env.observation()
                 next_state_raw, reward, terminated, truncated, info = self.env.step(action)
+
+                volume_after_action, _, _, _, _, _, _ = self.env.observation()
+
+                # if buy -> check action
+                # add money to the tank
+                # price, volume bought (for later),
+                if action > 0:
+                    self.money_in_tank += self.calculate_energy_in_tank_in_eu((volume_after_action - volume_before_action ), price_before_action)
+                elif action < 0:
+                    self.money_in_tank -= self.calculate_energy_in_tank_in_eu((volume_after_action - volume_before_action ), price_before_action)
+
+                # if sell
+                # remove money from tank
 
                 volume, price, _, _, _, _, _ = self.env.observation()
                 #### manipulate reward below
                 #(self, profit, price, volume, volume_to_MWh)
-                profit = reward
+                reward = reward + self.money_in_tank
 
               #  reward = self.reward_shape(profit, price, volume, self.env.volume_to_MWh, action)
 
@@ -250,7 +269,7 @@ agent_standard_greedy.train(
     simulations=10000,    # Increase this! 50 is too low for 2,400 states
     learning_rate=0.01,   # Lower LR is more stable for Q-tables
     epsilon=1.0,          # Start at 100% exploration
-    epsilon_decay=8000,   # Decay slowly over 80% of training
+    epsilon_decay=100,   # Decay slowly over 80% of training
     adaptive_epsilon=True
 )
 agent_standard_greedy.visualize_rewards()
