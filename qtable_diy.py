@@ -101,7 +101,13 @@ class QAgent():
         '''
 
         # Solution:
-        self.Qtable = np.zeros((self.state_space, self.state_space, self.action_space))
+        self.Qtable = np.zeros((
+            self.bin_size[0],  # Volume bins
+            self.bin_size[1],  # Price bins
+            self.bin_size[2],  # Hour bins
+            len(self.day_type_bins) - 1,  # Day-type bins
+            self.action_space  # Actions
+        ))
         #self.Qtable = np.zeros(tuple(self.bin_size) + (self.action_space,))
 
     def train(self, simulations, learning_rate, epsilon=0.05, epsilon_decay=1000, adaptive_epsilon=True,
