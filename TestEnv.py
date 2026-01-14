@@ -82,3 +82,12 @@ class HydroElectric_Test(gym.Env):
         self.state = np.array([dam_level, price, int(hour), int(day_of_week), int(day_of_year), int(month), int(year)])
 
         return self.state
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self.counter = 0
+        self.hour = 1
+        self.day = 1
+        self.volume = self.max_volume / 2
+        self.state = self.observation()
+        return self.state, {}
