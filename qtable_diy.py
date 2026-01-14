@@ -12,7 +12,7 @@ random.seed(7)
 
 class QAgent():
 
-    def __init__(self, env_name, discount_rate=0.99, bin_size=20):
+    def __init__(self, env_name, discount_rate=0.95, bin_size=20):
 
         '''
         Params:
@@ -90,6 +90,27 @@ class QAgent():
 
         # Returns the discretized state from an observation
         return digitized_state
+
+    def visualize_rewards(self):
+        plt.figure(figsize=(7.5, 7.5))
+        plt.plot(100 * (np.arange(len(self.average_rewards)) + 1), self.average_rewards)
+        plt.axhline(y=-110, color='r', linestyle='-')
+        plt.title('Average reward over the past 100 simulations', fontsize=10)
+        plt.legend(['Q-learning performance', 'Benchmark'])
+        plt.xlabel('Number of simulations', fontsize=10)
+        plt.ylabel('Average reward', fontsize=10)
+
+    def reward_shape(self, profit, price, volume, volume_to_MWh, action):
+        # aciton = 1 pump
+        #action -1 sell
+        price_current_volume = (volume * volume_to_MWh * price)
+
+        if action > 0:
+            return profit + price_current_volume
+        else:
+            return profit - price_current_volume
+
+
 
     def create_Q_table(self):
         self.state_space = len(self.bin_size) - 1
@@ -183,8 +204,15 @@ class QAgent():
 
                 action = action_index - 1
 
-                # Step environment
+            # Step environment
                 next_state_raw, reward, terminated, truncated, info = self.env.step(action)
+
+                volume, price, _, _, _, _, _ = self.env.observation()
+                #### manipulate reward below
+                #(self, profit, price, volume, volume_to_MWh)
+                profit = reward
+
+              #  reward = self.reward_shape(profit, price, volume, self.env.volume_to_MWh, action)
 
                 # print(f"Step Reward: {reward} | Info: {info}")
                 done = terminated or truncated
@@ -197,7 +225,7 @@ class QAgent():
                 Q_target = reward + self.discount_rate * np.max(self.Qtable[next_state_tuple])
 
                 # TD Update
-                current_q = self.Qtable[state_tuple][action]
+                current_q = self.Qtable[state_tuple][action_index]
                 self.Qtable[state_tuple][action] = current_q + self.learning_rate * (Q_target - current_q)
 
                 total_rewards += reward
@@ -219,10 +247,11 @@ class QAgent():
 
 agent_standard_greedy = QAgent("test")
 agent_standard_greedy.train(
-    simulations=15000,    # Increase this! 50 is too low for 2,400 states
+    simulations=10000,    # Increase this! 50 is too low for 2,400 states
     learning_rate=0.01,   # Lower LR is more stable for Q-tables
     epsilon=1.0,          # Start at 100% exploration
     epsilon_decay=8000,   # Decay slowly over 80% of training
     adaptive_epsilon=True
 )
-l = 1
+agent_standard_greedy.visualize_rewards()
+
