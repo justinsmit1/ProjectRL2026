@@ -12,7 +12,7 @@ random.seed(7)
 
 class QAgent():
 
-    def __init__(self, env_name, discount_rate=0.95, bin_size=20):
+    def __init__(self, discount_rate=0.95, bin_size=20):
 
         '''
         Params:
@@ -99,6 +99,8 @@ class QAgent():
         plt.legend(['Q-learning performance', 'Benchmark'])
         plt.xlabel('Number of simulations', fontsize=10)
         plt.ylabel('Average reward', fontsize=10)
+        plt.savefig('average_rewards.png')
+        plt.show()
 
     def reward_shape(self, profit, price, volume, volume_to_MWh, action):
         # aciton = 1 pump
@@ -210,30 +212,31 @@ class QAgent():
                 action = action_index - 1
 
             # Step environment
-                volume_before_action, price_before_action, _, _, _, _, _ = self.env.observation()
-                next_state_raw, reward, terminated, truncated, info = self.env.step(action)
+                volume_before, price_before, *_ = self.env.observation()
 
-                volume_after_action, _, _, _, _, _, _ = self.env.observation()
+                # Step environment
+                next_state_raw, _, terminated, truncated, info = self.env.step(action)
 
-                # if buy -> check action
-                # add money to the tank
-                # price, volume bought (for later),
-                if action > 0:
-                    self.money_in_tank += self.calculate_energy_in_tank_in_eu((volume_after_action - volume_before_action ), price_before_action)
-                elif action < 0:
-                    self.money_in_tank -= self.calculate_energy_in_tank_in_eu((volume_after_action - volume_before_action ), price_before_action)
+                volume_after, price_after, *_ = self.env.observation()
 
-                # if sell
-                # remove money from tank
+                # Energy change
+                delta_volume = volume_after - volume_before
+                delta_energy = delta_volume * self.env.volume_to_MWh
 
-                volume, price, _, _, _, _, _ = self.env.observation()
-                #### manipulate reward below
-                #(self, profit, price, volume, volume_to_MWh)
-                reward = reward + self.money_in_tank
+                # ---------- REWARD SHAPING ----------
+                reward = 0.0
 
-              #  reward = self.reward_shape(profit, price, volume, self.env.volume_to_MWh, action)
+                if action > 0:  # pump (buy)
+                    cost = delta_energy * price_before
+                    self.cash_profit -= cost
+                    self.energy_inventory += delta_energy
+                    reward = -cost
 
-                # print(f"Step Reward: {reward} | Info: {info}")
+                elif action < 0:  # sell
+                    revenue = -delta_energy * price_before
+                    self.cash_profit += revenue
+                    self.energy_inventory += delta_energy
+                    reward = revenue
                 done = terminated or truncated
 
                 # Discretize next state
@@ -269,7 +272,7 @@ agent_standard_greedy.train(
     simulations=10000,    # Increase this! 50 is too low for 2,400 states
     learning_rate=0.01,   # Lower LR is more stable for Q-tables
     epsilon=1.0,          # Start at 100% exploration
-    epsilon_decay=100,   # Decay slowly over 80% of training
+    epsilon_decay=1000,   # Decay slowly over 80% of training
     adaptive_epsilon=True
 )
 agent_standard_greedy.visualize_rewards()
