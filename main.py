@@ -1,188 +1,114 @@
 from TestEnv import HydroElectric_Test
 import argparse
 import matplotlib.pyplot as plt
+import numpy as np
+import yaml
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--excel_file', type=str, default='DATA/validate.xlsx') # Path to the excel file with the test data
+parser.add_argument('--excel_file', type=str, default='DATA/validate.xlsx')
+#parser.add_argument('--qtable', type=str, default='qtable.npy')
+#parser.add_argument("--bins", type = str, default = 'bins.yaml')
 args = parser.parse_args()
 
 env = HydroElectric_Test(path_to_test_data=args.excel_file)
+#env = HydroElectric_Test(path_to_test_data=args.excel_file)
 total_reward = []
 cumulative_reward = []
+#q_table = np.load(args.qtable)
+q_table = np.load("BEST_qtable.npy")
+
+actions = np.array([-1.0, 0, 1.0])
+action_space = len(actions)
+
+volume_states = 5
+price_states = 2    #above or below average
+hour_states = 24
+cold_states = 2     #cold or warm month
+
+volume_bins = np.linspace(0, env.max_volume, volume_states + 1)
+binary_bins = np.array([-0.5, 0.5, 1.5])
+hour_bins = np.arange(0.5, 24.5 + 1e-9, 1.0)
+
+bins = [volume_bins, binary_bins, hour_bins, binary_bins]
+
+
+prices_1d = env.price_values.flatten()
+
+def price_above_24h_avg(x, window=24):
+
+    # Returns if the price is above or below the average price of the last 24 hours
+
+    start = max(0, x - window)
+    previous = prices_1d[start:x + 1]
+    current = prices_1d[x]
+    avg = float(np.mean(previous)) if len(previous) > 0 else float(current)
+
+    if float(current) > avg:
+        return 1.0
+    else:
+        return 0.0
+
+def is_cold_month(month):
+
+    # Returns if it is a cold month
+
+    if int(month) in {11, 12, 1, 2, 3}:
+        return 1.0
+    else:
+        return 0.0
+
+def features(obs, x):
+
+    # Putt all important features in one list
+
+    volume = float(obs[0])
+    hour = float(obs[2])
+    month = float(obs[5])
+    price = float(price_above_24h_avg(x))
+    cold = float(is_cold_month(month))
+    return np.array([volume, price, hour, cold])
+
+def discretize_state(compact_state):
+
+    # Discretenize state
+
+    digitized_state = []
+    for i in range(len(bins)):
+        raw_idx = np.digitize(compact_state[i], bins[i]) - 1
+        safe_idx = int(np.clip(raw_idx, 0, len(bins[i]) - 2))
+        digitized_state.append(safe_idx)
+    return digitized_state
 
 observation = env.observation()
-
-def heuristic_action1(observation):
-    # obs =[volume, price, hour_of_day, day_of_week, day_of_year, month_of_year, year]
-    volume, price, hour, dow, doy, month, year = observation
-
-    if 0 <= hour <= 6:
-        return 1.0   # pump
-    elif 17 <= hour <= 21:
-        return -1.0  # sell
-    else:
-        return 0.0   # hold
-
-def heuristic_action2(observation):
-    # obs =[volume, price, hour_of_day, day_of_week, day_of_year, month_of_year, year]
-    volume, price, hour, dow, doy, month, year = observation
-
-    if 9 <= hour <= 20:
-        return -1.0   # pump
-    else:
-        return 1
-
-def heuristic_action3(observation):
-    # obs =[volume, price, hour_of_day, day_of_week, day_of_year, month_of_year, year]
-    volume, price, hour, dow, doy, month, year = observation
-
-    if 3 <= hour <= 7:
-        return 1.0   # pump
-    elif 11 <= hour <= 14:
-        return -1.0  # sell
-    else:
-        return 0.0   # hold
-
-def heuristic_action4(observation):
-    # obs =[volume, price, hour_of_day, day_of_week, day_of_year, month_of_year, year]
-    volume, price, hour, dow, doy, month, year = observation
-
-    if 3 <= hour <= 7:
-        return 1.0   # pump
-    elif 11 <= hour <= 14:
-        return -1.0  # sell
-    else:
-        return 0.0   # hold
-
-def heuristic_mees(observation):
-    #Takes into account that there is a peak in the winter month later in the day
-    # obs =[volume, price, hour_of_day, day_of_week, day_of_year, month_of_year, year]
-    volume, price, hour, dow, doy, month, year = observation
-    if month in [11, 10, 12, 1, 2]:
-        if 2 <= hour <= 7:
-            return 0.2   # pump
-        elif 10 <= hour <= 12:
-            return -0.5  # sell
-        elif 18 <= hour <= 21:
-            return -0.33  # sell
-        else:
-            return 0.0   # hold
-    else:
-        if 2 <= hour <= 7:
-            return 0.2   # pump
-        elif 9 <= hour <= 14:
-            return -01.0  # sell
-        else:
-            return 0.0   # hold
-
-def heuristic_mees2(observation, avg):
-    #Takes into account that there is a peak in the winter month later in the day
-    #Also uses avrage price to be sure the price is good
-    # obs =[volume, price, hour_of_day, day_of_week, day_of_year, month_of_year, year]
-    volume, price, hour, dow, doy, month, year = observation
-    if month in [11, 10, 12, 1, 2]:
-        if 2 <= hour <= 7 and price < avg:
-            return 1.0   # pump
-        elif 10 <= hour <= 12 and price > avg:
-            return -1.0  # sell
-        elif 18 <= hour <= 21 and price > avg:
-            return -1.0  # sell
-        else:
-            return 0.0   # hold
-    else:
-        if 2 <= hour <= 7 and price < avg:
-            return 1.0   # pump
-        elif 9 <= hour <= 14 and price > avg:
-            return -1.0  # sell
-        else:
-            return 0.0   # hold
-
-def heuristic_mees3(observation, avg):
-    """
-    observation = [volume, price, hour_of_day, day_of_week,
-                   day_of_year, month_of_year, year]
-
-    Output range: [-1, 1]
-    +1  = max pump
-    -1  = max sell
-    0   = hold
-    """
-
-    threshold = 0
-    volume, price, hour, dow, doy, month, year = observation
-
-    # Normalize tank level to [0, 1]
-    tank_capacity = volume / 100000
-    tank_capacity = max(0.0, min(1.0, tank_capacity))
-
-    # Normalized price difference (scale controls aggressiveness)
-    price_scale = avg if avg != 0 else 1.0
-    price_diff = (price - avg) / price_scale
-
-    def pump_strength():
-        # Stronger when tank is empty AND price is much lower than avg
-        return (1.0 - tank_capacity) * max(0.0, -price_diff)
-
-    def sell_strength():
-        # Stronger when tank is full AND price is much higher than avg
-        return -tank_capacity * max(0.0, price_diff)
-
-    winter_months = [11, 10, 12, 1, 2]
-
-    if month in winter_months:
-        if 2 <= hour <= 7 and price < avg - threshold and tank_capacity < 1.0:
-            return pump_strength()
-
-        elif ((10 <= hour <= 12) or (18 <= hour <= 21)) \
-                and price > avg + threshold and tank_capacity > 0.0:
-            return sell_strength()
-
-        else:
-            return 0.0
-
-    else:
-        if 2 <= hour <= 7 and price < avg - threshold and tank_capacity < 1.0:
-            return pump_strength()
-
-        elif 9 <= hour <= 14 and price > avg + threshold and tank_capacity > 0.0:
-            return sell_strength()
-
-        else:
-            return 0.0
-
-prices = []
-
 for i in range(730*24 -1): # Loop through 2 years -> 730 days * 24 hours
-    # Choose a random action between -1 (full capacity sell) and 1 (full capacity pump)
-    volume, price, hour, dow, doy, month, year = observation
 
+    # Use counter value for features
+    x = env.counter
 
-    prices.append(price)
+    # discretize states
+    features_list = features(observation, x)
+    state = discretize_state(features_list)
+    state_tuple = tuple(state)
 
-    last_prices = prices[-24:]
-    avg_24h_price = sum(last_prices) / len(last_prices)
+    # Select action
+    action_index = int(np.argmax(q_table[state_tuple]))
+    action = float(actions[action_index])
 
-
- #   action = env.continuous_action_space.sample()
-    action = heuristic_mees3(observation, avg_24h_price)
-
-    # Or choose an action based on the observation using your RL agent!:
     # action = RL_agent.act(observation)
     # The observation is the tuple: [volume, price, hour_of_day, day_of_week, day_of_year, month_of_year, year]
     next_observation, reward, terminated, truncated, info = env.step(action)
+
+    # Add total reward
     total_reward.append(reward)
     cumulative_reward.append(sum(total_reward))
 
     done = terminated or truncated
     observation = next_observation
 
+    # Plot it
     if done:
         print('Total reward: ', sum(total_reward))
         # Plot the cumulative reward over time
         plt.plot(cumulative_reward)
         plt.xlabel('Time (Hours)')
         plt.show()
-
-
-
-
