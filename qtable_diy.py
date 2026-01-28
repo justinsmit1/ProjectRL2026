@@ -24,7 +24,7 @@ class QAgent():
         '''
 
         # create an environment
-        self.env = HydroElectric_Test(path_to_test_data = "DATA/validate.xlsx")
+        self.env = HydroElectric_Test(path_to_test_data = "DATA/TRAIN.xlsx")
 
         self.prices_1d = self.env.price_values.flatten()
 
@@ -39,44 +39,159 @@ class QAgent():
 
         # State incorporates the observation state
         # Get the low and high values of the environment space
+        # self.low = np.array([
+        #     0,  # volume
+        #     np.min(self.env.price_values),  # price
+        #     1,  # hour
+        #     0,  # day_of_week
+        #     1,  # day_of_year
+        #     1,  # month
+        #     self.env.timestamps.dt.year.min()  # year
+        # ], dtype=np.float32)
+
+        # self.high = np.array([
+        #     self.env.max_volume,
+        #     np.max(self.env.price_values),
+        #     24,
+        #     6,
+        #     365,
+        #     12,
+        #     self.env.timestamps.dt.year.max()
+        # ], dtype=np.float32)
+
         self.low = np.array([
             0,  # volume
             np.min(self.env.price_values),  # price
             1,  # hour
-            0,  # day_of_week
-            1,  # day_of_year
-            1,  # month
-            self.env.timestamps.dt.year.min()  # year
+            0, # is_weekend
+            0, #season
         ], dtype=np.float32)
 
         self.high = np.array([
             self.env.max_volume,
             np.max(self.env.price_values),
             24,
-            6,
-            365,
-            12,
-            self.env.timestamps.dt.year.max()
+            1,
+            3,
         ], dtype=np.float32)
 
-        self.bin_size = [5, 8, 5]                #volume = 10, price, hour, day
-        self.day_type_bins = np.array([-0.5, 0.5, 1.5])
-        self.hour_bins = np.array([0.5, 6.5, 12.5, 17.5, 21.5, 24.5])
-
+        #self.bin_size = [3, 5, 2, 4]
+        self.bin_size = [3, 5, 8, 2, 4]
         # Manually define meaningful bins
         self.bins = [
             np.linspace(0, self.env.max_volume, self.bin_size[0]),  # Volume
-            np.linspace(0, 1, self.bin_size[1]),  # precentile price
-            self.hour_bins,
-#            self.day_type_bins  # Day of week
+            #np.linspace(0, self.high[1], self.bin_size[1]),  # Price
+            np.linspace(0, 1, self.bin_size[1]),  # Price
+            np.linspace(1, 24, self.bin_size[2]),  # Hour (every 4 hours)
+            np.linspace(0, 1, self.bin_size[3]),  # weekend
+            np.linspace(0, 3, self.bin_size[4])  # seasons
         ]
+#         self.bin_size = [5, 8, 5]                #volume = 10, price, hour, day
+#         self.day_type_bins = np.array([-0.5, 0.5, 1.5])
+#         self.hour_bins = np.array([0.5, 6.5, 12.5, 17.5, 21.5, 24.5])
+#
+#         # Manually define meaningful bins
+#         self.bins = [
+#             np.linspace(0, self.env.max_volume, self.bin_size[0]),  # Volume
+#             np.linspace(0, 1, self.bin_size[1]),  # precentile price
+#             self.hour_bins,
+# #            self.day_type_bins  # Day of week
+#         ]
+
+    # def discretize_state(self, state):
+    #     digitized_state = []
+    #     for i in range(len(self.bins)):
+    #         raw_idx = np.digitize(state[i], self.bins[i]) - 1
+    #         safe_idx = int(np.clip(raw_idx, 0, len(self.bins[i]) - 2))
+    #         digitized_state.append(safe_idx)
+    #     return digitized_state
+
+    def discretize_state_debug(self, state):
+        """
+        Discretizes a continuous state into bins with detailed debug information.
+        Prints raw values, bins, digitized indices, clipped indices, and checks Q-table bounds.
+        """
+
+        print("=== Discretization Debug ===")
+        print("Raw state:", state)
+
+        # Apply weekday/weekend and season logic
+        # Weekday/weekend
+        day_of_week = state[3]
+        state[3] = 0 if day_of_week < 5 else 1
+
+        # Season
+        month = state[5]
+        if month in [12, 1, 2]:
+            state[5] = 0  # Winter
+        elif month in [3, 4, 5]:
+            state[5] = 1  # Spring
+        elif month in [6, 7, 8]:
+            state[5] = 2  # Summer
+        elif month in [9, 10, 11]:
+            state[5] = 3  # Autumn
+
+        digitized_state = []
+
+        for i in range(len(self.bins)):
+            raw_idx = np.digitize(state[i], self.bins[i])
+            safe_idx = int(np.clip(raw_idx - 1, 0, len(self.bins[i]) - 2))
+
+            print(f"State[{i}] = {state[i]}")
+            print(f"  Bin edges: {self.bins[i]}")
+            print(f"  Digitized index (np.digitize) = {raw_idx}")
+            print(f"  Safe/clipped index = {safe_idx}")
+            print(f"  Q-table dimension = {self.Qtable.shape[i]}\n")
+
+            # Check for out-of-bounds
+            if safe_idx >= self.Qtable.shape[i]:
+                print(f"ERROR: safe_idx {safe_idx} out of bounds for dimension {i}!")
+
+            digitized_state.append(safe_idx)
+
+        print("Final discretized state:", digitized_state)
+        print("===========================\n")
+
+        return digitized_state
+
 
     def discretize_state(self, state):
+
+        '''
+        Params:
+        state = state observation that needs to be discretized
+
+
+        Returns:
+        discretized state
+        '''
+
+        #[dam_level, price, int(hour), int(day_of_week), int(day_of_year), int(month), int(year)]
+        month = state[5]
+
+        match month:
+            case 12 | 1 | 2:
+                state[5] = 0 #"winter"
+            case 3 | 4 | 5:
+                state[5] = 1 #"spring"
+            case 6 | 7 | 8:
+                state[5] = 2 #"summer"
+            case 9 | 10 | 11:
+                state[5] = 3 #"autumn"
+
+        # Now we can make use of the function np.digitize and bin it
+
+        day_of_week = state[3]
+        if day_of_week < 5:
+            state[3] = 0  # Weekday
+        else:
+            state[3] = 1  # Weekend
+
         digitized_state = []
         for i in range(len(self.bins)):
-            raw_idx = np.digitize(state[i], self.bins[i]) - 1
-            safe_idx = int(np.clip(raw_idx, 0, len(self.bins[i]) - 2))
-            digitized_state.append(safe_idx)
+            digitized_state.append(np.digitize(state[i], self.bins[i]) - 1)
+
+        # Returns the discretized state from an observation
         return digitized_state
 
     def rolling_percentile(self, idx, window=24):
@@ -117,7 +232,7 @@ class QAgent():
         else:
             return profit - price_current_volume
 
-    def calculate_energy_in_tank_in_eu(self, volume, price):
+    def calculate_price_in_tank(self, volume, price):
         return (volume * self.env.volume_to_MWh * price)
 
     def calculate_energy_in_tank(self, volume):
@@ -125,8 +240,6 @@ class QAgent():
 
 
     def create_Q_table(self):
-        self.state_space = len(self.bin_size) - 1
-        # Initialize all values in the Q-table to zero
 
         '''
         ToDo:
@@ -134,13 +247,26 @@ class QAgent():
         '''
 
         # Solution:
+        # self.Qtable = np.zeros((
+        #     self.bin_size[0],  # Volume bins
+        #     self.bin_size[1],  # Price bins
+        #     self.bin_size[2],  # Hour bins
+        #     self.action_space  # Actions
+        # ))
+        #
+
         self.Qtable = np.zeros((
             self.bin_size[0],  # Volume bins
             self.bin_size[1],  # Price bins
             self.bin_size[2],  # Hour bins
+            self.bin_size[3],  # weekend
+            self.bin_size[4],  # seasons
             self.action_space  # Actions
         ))
         #self.Qtable = np.zeros(tuple(self.bin_size) + (self.action_space,))
+
+    def read_Q_table(self, filepath_qtable = "qtable.npy"):
+        self.Qtable = np.load(filepath_qtable)
 
     def evaluate_greedy(self, steps_to_plot: int = 48, window: int = 48):
         """
@@ -151,13 +277,18 @@ class QAgent():
           2) percentile + action markers
           3) energy in tank
         """
-        obs, _ = self.env.reset()
+        self.env.counter = 0
+        self.env.hour = 1
+        self.env.day = 1
+        self.env.volume = self.env.max_volume / 2
+        obs = self.env.observation()
+
         done = False
 
         # reset inventory trackers to match your training logic
         _, real_price, *_ = self.env.observation()
         self.energy_in_tank = self.calculate_energy_in_tank(obs[0])
-        self.money_in_tank = self.calculate_energy_in_tank_in_eu(obs[0], real_price)
+        self.money_in_tank = self.calculate_price_in_tank(obs[0], real_price)
 
         # logging
         log_price = []
@@ -276,13 +407,19 @@ class QAgent():
         print("Greedy evaluation (env reward):", total_env_reward)
         return total_env_reward
 
+    def validate(self, validate_path):
+
+
+
+        pass
+
     def train(self, simulations, learning_rate, epsilon=0.05, epsilon_decay=1000, adaptive_epsilon=True,
               adapting_learning_rate=False):
 
         '''
         Params:
 
-        simulations = number of episodes of a game to run
+        simulations = number of episodes of a gam-e to run
         learning_rate = learning rate for the update equation
         epsilon = epsilon value for epsilon-greedy algorithm
         epsilon_decay = number of full episodes (games) over which the epsilon value will decay to its final value
@@ -321,7 +458,13 @@ class QAgent():
 
             print(f'Please wait, the algorithm is learning! The current simulation is {i}')
             # Initialize the state
-            state, _ = self.env.reset()
+            self.env.counter = 0
+            self.env.hour = 1
+            self.env.day = 1
+            self.env.volume = self.env.max_volume / 2
+            state = self.env.observation()
+
+            # state, _ = self.env.reset()
 
             _, real_price, *_ = self.env.observation()
 
@@ -331,7 +474,7 @@ class QAgent():
 
             self.cash = 0.0
 
-            self.money_in_tank = self.calculate_energy_in_tank_in_eu(state[0], real_price)
+            self.money_in_tank = self.calculate_price_in_tank(state[0], real_price)
             self.energy_in_tank = self.calculate_energy_in_tank(state[0])
 
             #print(state)
@@ -339,7 +482,6 @@ class QAgent():
             done = False
 
             # Discretize the state space
-
             state = self.discretize_state(state)
 
             # Set the rewards to 0
@@ -435,9 +577,10 @@ class QAgent():
                     self.money_in_tank = 0.0
 
                 # Discretize next state
+                #print(f"current  {self.env.observation()}")
                 next_state = self.discretize_state(next_state_raw)
                 next_state_tuple = tuple(next_state)
-
+                #print(f"next_state {next_state_tuple}")
                 reward = float(reward)
                 # TD Target: reward + gamma * max(Q[next_state])
                 Q_target = reward + self.discount_rate * np.max(self.Qtable[next_state_tuple])
@@ -473,14 +616,27 @@ class QAgent():
         print("Q-table saved to qtable.npy")
 
 
+    def validate_q_table(self, path_test_data = str):
+
+
+
+
+
+
+
+        pass
+
+
 agent_standard_greedy = QAgent()
 agent_standard_greedy.train(
-    simulations=1000,    # Increase this! 50 is too low for 2,400 states
-    learning_rate=0.03,   # Lower LR is more stable for Q-tables
+    simulations=500,    # Increase this! 50 is too low for 2,400 states
+    learning_rate=0.01,   # Lower LR is more stable for Q-tables
     epsilon=1.0,          # Start at 100% exploration
-    epsilon_decay=800,   # Decay slowly over 80% of training
+    epsilon_decay=1000,   # Decay slowly over 80% of training
     adaptive_epsilon=True
 )
 agent_standard_greedy.evaluate_greedy()
 agent_standard_greedy.visualize_rewards()
+
+
 
